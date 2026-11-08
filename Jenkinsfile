@@ -94,5 +94,11 @@ pipeline {
             echo 'Pipeline Failed!'
             echo 'Please check the Console Output.'
         }
+
+        always {
+        echo 'Cleaning Jenkins Workspace...'
+        cleanWs()
+        echo 'Workspace Cleanup Completed!'
+    }
     }
 }
