@@ -45,7 +45,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write([]byte("Hello! Welcome to My Lab.Here I practice Jenkins.")); err != nil {
+	if _, err := w.Write([]byte("Hello! Brother./n Welcome to My Lab.Here I practice Jenkins.")); err != nil {
 		log.Printf("write error: %v", err)
 	}
 }
