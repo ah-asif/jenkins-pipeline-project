@@ -53,57 +53,68 @@ pipeline {
         }
 
         // 4. DEPLOY CONTAINER (MAIN ONLY)
-        stage('Deploy Container') {
+        
+stage('Deploy Container') {
 
-            when {
-                branch 'main'
-            }
+    when {
+        branch 'main'
+    }
 
-            steps {
-                echo 'Deploying Go Application...'
+    steps {
+        echo 'Deploying Go Application...'
 
-                sh '''
-                    set -eu
+        sh '''
+            set -eu
 
-                    # Remove existing container
-                    if docker container inspect "$APP_NAME" >/dev/null 2>&1; then
+            echo "Checking existing container..."
 
-                        echo "Removing existing container..."
+            # Request removal of the previous container.
+            docker rm -f "$APP_NAME" || true
 
-                        docker rm -f "$APP_NAME" || true
+            echo "Waiting for Docker to release container name..."
 
-                        REMOVED=false
+            DEPLOYED=false
 
-                        for i in $(seq 1 30); do
+            # Retry actual container creation.
+            for i in $(seq 1 30); do
 
-                            if ! docker container inspect "$APP_NAME" >/dev/null 2>&1; then
-                                REMOVED=true
-                                break
-                            fi
+                if OUTPUT=$(docker run -d \
+                    --name "$APP_NAME" \
+                    --restart unless-stopped \
+                    -e PORT="$APP_PORT" \
+                    -p "$APP_PORT:$APP_PORT" \
+                    "${IMAGE_NAME}:${IMAGE_TAG}" 2>&1); then
 
-                            echo "Waiting for removal... ($i/30)"
-                            sleep 1
-
-                        done
-
-                        if [ "$REMOVED" != "true" ]; then
-                            echo "Container removal timed out!"
-                            exit 1
-                        fi
-                    fi
-
-                    # Deploy locally built image
-                    docker run -d \
-                        --name "$APP_NAME" \
-                        --restart unless-stopped \
-                        -e PORT="$APP_PORT" \
-                        -p "$APP_PORT:$APP_PORT" \
-                        "${IMAGE_NAME}:${IMAGE_TAG}"
-
+                    echo "$OUTPUT"
                     echo "Container deployed successfully!"
-                '''
-            }
-        }
+                    DEPLOYED=true
+                    break
+                fi
+
+                echo "Docker deployment attempt $i failed:"
+                echo "$OUTPUT"
+
+                # Retry only if the container name is still reserved.
+                if echo "$OUTPUT" | grep -qi "already in use"; then
+                    echo "Container name is still reserved. Waiting..."
+                    sleep 2
+                else
+                    echo "Unexpected Docker deployment error!"
+                    exit 1
+                fi
+
+            done
+
+            if [ "$DEPLOYED" != "true" ]; then
+                echo "ERROR: Could not deploy after 30 attempts."
+                exit 1
+            fi
+
+            docker ps --filter "name=^/${APP_NAME}$"
+        '''
+    }
+}
+
 
         // 5. VERIFY DEPLOYMENT
         stage('Verify Deployment') {
