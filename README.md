@@ -24,7 +24,7 @@ Other methods return `405`, unknown paths return `404`.
 
 ## Configuration
 
-`PORT` sets the listening port (default `8080`).
+`PORT` sets the listening port (`9090`).
 
 ## Run locally
 
@@ -37,13 +37,13 @@ Other methods return `405`, unknown paths return `404`.
 ## Docker
 
     docker build -t go-docker-app .
-    docker run --rm -p 8080:8080 go-docker-app
+    docker run --rm -p 9090:9090 go-docker-app
 
 Test:
 
-    curl -i http://localhost:8080/
-    curl -i http://localhost:8080/api
-    curl -i http://localhost:8080/health
-    curl -i -X POST http://localhost:8080/api   # 405
+    curl -i http://localhost:9090/
+    curl -i http://localhost:9090/api
+    curl -i http://localhost:9090/health
+    curl -i -X POST http://localhost:9090/api   # 405
 
 Stop with `docker stop <container>`; the server shuts down gracefully on SIGTERM.
