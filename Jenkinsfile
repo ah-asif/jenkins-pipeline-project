@@ -1,3 +1,4 @@
+
 pipeline {
 
     agent any
@@ -8,61 +9,131 @@ pipeline {
     }
 
     environment {
-        APP_NAME = 'go-api'
+        APP_NAME  = 'go-api'
         IMAGE_NAME = 'go-api'
-        APP_PORT = '9090'
+        APP_PORT  = '9090'
     }
 
     stages {
 
+        // 1. CHECKOUT
         stage('Checkout') {
             steps {
-                echo 'Cloning GitHub Repository...'
-
-                git branch: 'main',
-                    credentialsId: '91b54de1-3220-4d55-965e-e31b50343092',
-                    url: 'https://github.com/ah-asif/ah-private-repo.git'
+                echo "Building branch: ${env.BRANCH_NAME}"
+                checkout scm
             }
         }
 
+        // 2. PREPARE IMAGE TAG
+        stage('Prepare Image Tag') {
+            steps {
+                script {
+                    env.IMAGE_TAG = ("${env.BUILD_NUMBER}-${env.BRANCH_NAME}")
+                        .toLowerCase()
+                        .replaceAll(/[^a-z0-9_.-]/, '-')
+                }
+
+                echo "Image: ${IMAGE_NAME}:${IMAGE_TAG}"
+            }
+        }
+
+        // 3. BUILD DOCKER IMAGE
         stage('Build Docker Image') {
             steps {
-                echo 'Building Go Docker Image...'
+                echo 'Building Go API Docker Image...'
 
                 sh '''
+                    set -e
+
                     docker build \
-                        -t ${IMAGE_NAME}:${BUILD_NUMBER} \
-                        -t ${IMAGE_NAME}:latest \
+                        -t "${IMAGE_NAME}:${IMAGE_TAG}" \
                         .
                 '''
             }
         }
 
-        stage('Deploy Container') {
-            steps {
-                echo 'Deploying Go Application...'
+        // 4. DEPLOY CONTAINER (MAIN ONLY)
+        
+stage('Deploy Container') {
 
-                sh '''
-                    docker rm -f ${APP_NAME} || true
+    when {
+        branch 'main'
+    }
 
-                    docker run -d \
-                        --name ${APP_NAME} \
-                        --restart unless-stopped \
-                        -e PORT=${APP_PORT} \
-                        -p ${APP_PORT}:${APP_PORT} \
-                        ${IMAGE_NAME}:${BUILD_NUMBER}
-                '''
-            }
-        }
+    steps {
+        echo 'Deploying Go Application...'
 
+        sh '''
+            set -eu
+
+            echo "Checking existing container..."
+
+            # Request removal of the previous container.
+            docker rm -f "$APP_NAME" || true
+
+            echo "Waiting for Docker to release container name..."
+
+            DEPLOYED=false
+
+            # Retry actual container creation.
+            for i in $(seq 1 30); do
+
+                if OUTPUT=$(docker run -d \
+                    --name "$APP_NAME" \
+                    --restart unless-stopped \
+                    -e PORT="$APP_PORT" \
+                    -p "$APP_PORT:$APP_PORT" \
+                    "${IMAGE_NAME}:${IMAGE_TAG}" 2>&1); then
+
+                    echo "$OUTPUT"
+                    echo "Container deployed successfully!"
+                    DEPLOYED=true
+                    break
+                fi
+
+                echo "Docker deployment attempt $i failed:"
+                echo "$OUTPUT"
+
+                # Retry only if the container name is still reserved.
+                if echo "$OUTPUT" | grep -qi "already in use"; then
+                    echo "Container name is still reserved. Waiting..."
+                    sleep 2
+                else
+                    echo "Unexpected Docker deployment error!"
+                    exit 1
+                fi
+
+            done
+
+            if [ "$DEPLOYED" != "true" ]; then
+                echo "ERROR: Could not deploy after 30 attempts."
+                exit 1
+            fi
+
+            docker ps --filter "name=^/${APP_NAME}$"
+        '''
+    }
+}
+
+
+        // 5. VERIFY DEPLOYMENT
         stage('Verify Deployment') {
+
+            when {
+                branch 'main'
+            }
+
             steps {
                 echo 'Checking Application Health...'
 
                 sh '''
+                    set -e
+
                     for i in $(seq 1 15); do
 
-                        if curl -fsS http://localhost:${APP_PORT}/health; then
+                        if curl -fsS \
+                            "http://localhost:${APP_PORT}/health"; then
+
                             echo ""
                             echo "Application is Healthy!"
                             exit 0
@@ -74,31 +145,74 @@ pipeline {
                     done
 
                     echo "Health Check Failed!"
-                    docker logs ${APP_NAME}
+
+                    docker logs "$APP_NAME"
+
                     exit 1
                 '''
             }
         }
+
+        // 6. ARCHIVE DEPLOYMENT INFORMATION
+        stage('Archive Deployment Info') {
+
+            when {
+                branch 'main'
+            }
+
+            steps {
+                echo 'Generating Deployment Metadata...'
+
+                sh '''
+                    cat > "deploy-info-${BUILD_NUMBER}.txt" <<EOF
+Build: ${BUILD_NUMBER}
+Image: ${IMAGE_NAME}:${IMAGE_TAG}
+Commit: $(git rev-parse HEAD)
+Branch: ${BRANCH_NAME}
+Time: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+URL: ${BUILD_URL}
+EOF
+                '''
+
+                archiveArtifacts(
+                    artifacts: "deploy-info-${BUILD_NUMBER}.txt",
+                    fingerprint: true,
+                    followSymlinks: false
+                )
+            }
+        }
     }
 
+    // 7. POST BUILD ACTIONS
     post {
+
         success {
             echo '================================'
-            echo 'DEPLOYMENT SUCCESSFUL!'
+            echo 'PIPELINE SUCCESSFUL!'
             echo '================================'
-            echo 'Application: http://localhost:9090'
-            echo 'Health: http://localhost:9090/health'
+
+            script {
+                if (env.BRANCH_NAME == 'main') {
+                    echo "Application: http://localhost:${APP_PORT}"
+                    echo "Health: http://localhost:${APP_PORT}/health"
+                } else {
+                    echo "Branch/PR build successful."
+                    echo "No deployment performed."
+                }
+            }
         }
 
         failure {
-            echo 'Pipeline Failed!'
-            echo 'Please check the Console Output.'
+            echo 'PIPELINE FAILED!'
+            echo 'Check Jenkins Console Output.'
         }
 
         always {
-        echo 'Cleaning Jenkins Workspace...'
-        cleanWs()
-        echo 'Workspace Cleanup Completed!'
-    }
+            echo "Build ${env.BUILD_NUMBER} finished."
+
+            echo 'Cleaning Jenkins Workspace...'
+            cleanWs()
+            echo 'Workspace Cleanup Completed!'
+        }
     }
 }
