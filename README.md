@@ -16,7 +16,7 @@ A small HTTP server written with Go's standard library and packaged with Docker.
 
 | Route | Response |
 |-------|----------|
-| `/` | `Hello! Welcome to Go Docker App.` |
+| `/` | `Hello! Brother.\nHere I practice Jenkins..` |
 | `/api` | `{"message":"Hello from Go API!","status":"success"}` |
 | `/health` | `OK` (200) |
 
